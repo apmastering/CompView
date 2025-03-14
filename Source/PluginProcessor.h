@@ -1,11 +1,13 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 
-//==============================================================================
-/**
-*/
+
+constexpr int windowSize = 4;
+
+
 class CompViewAudioProcessor  : public juce::AudioProcessor
 {
 public:
@@ -25,10 +27,20 @@ public:
         
     juce::Array<float> peakLevelLeftSec;
     juce::Array<float> peakLevelRightSec;
+
+    
+    float samplesToAverageL[windowSize];
+    float samplesToAverageR[windowSize];
+    
+    std::atomic<double> currentSampleRate;
+    std::atomic<int> currentWindowSize;
+    
+    
+    float debugInfo;
     
     int countdown = 0;
     int sampleGrouping = 0;
-    float triggerThreshold = 0.8;
+    float triggerThreshold = 0.5;
         
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;

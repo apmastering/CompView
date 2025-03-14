@@ -5,15 +5,12 @@
 CompViewAudioProcessor::CompViewAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor (BusesProperties()
-                     #if ! JucePlugin_IsMidiEffect
-                      #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      #endif
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                     #endif
+                       .withInput  ("Input",  juce::AudioChannelSet::quadraphonic(), true)
+                       .withOutput ("Output", juce::AudioChannelSet::quadraphonic(), true)
                        )
 #endif
 {
+    currentWindowSize.store(windowSize);
 }
 
 
@@ -29,29 +26,17 @@ const juce::String CompViewAudioProcessor::getName() const
 
 bool CompViewAudioProcessor::acceptsMidi() const
 {
-   #if JucePlugin_WantsMidiInput
-    return true;
-   #else
     return false;
-   #endif
 }
 
 bool CompViewAudioProcessor::producesMidi() const
 {
-   #if JucePlugin_ProducesMidiOutput
-    return true;
-   #else
-    return false;
-   #endif
+  return false;
 }
 
 bool CompViewAudioProcessor::isMidiEffect() const
 {
-   #if JucePlugin_IsMidiEffect
-    return true;
-   #else
     return false;
-   #endif
 }
 
 double CompViewAudioProcessor::getTailLengthSeconds() const
@@ -61,8 +46,7 @@ double CompViewAudioProcessor::getTailLengthSeconds() const
 
 int CompViewAudioProcessor::getNumPrograms()
 {
-    return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
-                // so this should be at least 1, even if you're not really implementing programs.
+    return 1;
 }
 
 int CompViewAudioProcessor::getCurrentProgram()
@@ -86,78 +70,83 @@ void CompViewAudioProcessor::changeProgramName (int index, const juce::String& n
 //==============================================================================
 void CompViewAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+    currentSampleRate.store(sampleRate);
 }
 
 void CompViewAudioProcessor::releaseResources()
 {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
 bool CompViewAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-  #if JucePlugin_IsMidiEffect
-    juce::ignoreUnused (layouts);
-    return true;
-  #else
-    // This is the place where you check if the layout is supported.
-    // In this template code we only support mono or stereo.
-    // Some plugin hosts, such as certain GarageBand versions, will only
-    // load plugins that support stereo bus layouts.
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::quadraphonic())
         return false;
 
-    // This checks if the input layout matches the output layout
-   #if ! JucePlugin_IsSynth
-    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
-        return false;
-   #endif
-
     return true;
-  #endif
 }
 #endif
 
-void CompViewAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+
+void CompViewAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
-    
     int numSamples = buffer.getNumSamples();
+
+    if (buffer.getNumChannels() < 4) return;
+
+    auto* newLeftChannel = buffer.getReadPointer(0);    // Channel 1: Test signal (left)
+    auto* newRightChannel = buffer.getReadPointer(1);   // Channel 2: Test signal (right)
+    auto* refLeftChannel = buffer.getReadPointer(2);    // Channel 3: Reference signal (left)
+    auto* refRightChannel = buffer.getReadPointer(3);   // Channel 4: Reference signal (right)
+
     
-    float maxLeft = 0.0f;
-    float maxRight = 0.0f;
-    
-    if (buffer.getNumChannels() < 2) return;
-    
-    auto* leftChannel = buffer.getReadPointer(0);
-    auto* rightChannel = buffer.getReadPointer(1);
-    
-    for (int i = 0; i < numSamples; ++i)
-    {
+    for (int i = 0; i < numSamples; ++i) {
+
         if (countdown < 1) {
-            if (leftChannel[i] > triggerThreshold || rightChannel[i] > triggerThreshold) {
+
+            if (fabs(newLeftChannel[i]) > triggerThreshold || fabs(newRightChannel[i]) > triggerThreshold) {
                 countdown = 30000;
                 peakLevelLeftSec.clear();
                 peakLevelRightSec.clear();
             }
+            
         } else {
             countdown--;
         }
-        
 
-        sampleGrouping = (sampleGrouping + 1) % 8;
+        float refL = fabs(refLeftChannel[i]);
+        float newL = fabs(newLeftChannel[i]);
         
-        if (leftChannel[i] > maxLeft) maxLeft = leftChannel[i];
-        if (rightChannel[i] > maxRight) maxRight = rightChannel[i];
-
-        if (sampleGrouping == 0 & countdown > 18000) {
-            peakLevelLeftSec.add(maxLeft);
-            peakLevelRightSec.add(maxRight);
-            maxLeft = 0;
-            maxRight = 0;
+        float refR = fabs(refRightChannel[i]);
+        float newR = fabs(newRightChannel[i]);
+        
+        float gainDeviationL;
+        float gainDeviationR;
+        
+        if (refL == 0.0f) {
+            gainDeviationL = 0.0f;
+        } else {
+            gainDeviationL = newL / refL;
+        }
+        
+        if (refR == 0.0f) {
+            gainDeviationR = 0.0f;
+        } else {
+            gainDeviationR = newR / refR;
+        }
+        
+        debugInfo = gainDeviationL;
+        
+        samplesToAverageL[i % windowSize] = gainDeviationL;
+        samplesToAverageR[i % windowSize] = gainDeviationR;
+        
+        if (i % windowSize == 0 && countdown > 1) {
+            
+            std::sort(samplesToAverageL, samplesToAverageL + windowSize);
+            std::sort(samplesToAverageR, samplesToAverageR + windowSize);
+           
+            peakLevelLeftSec.add(samplesToAverageL[windowSize / 2]);
+            peakLevelRightSec.add(samplesToAverageR[windowSize / 2]);
         }
     }
 }
@@ -167,7 +156,7 @@ void CompViewAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 //==============================================================================
 bool CompViewAudioProcessor::hasEditor() const
 {
-    return true; // (change this to false if you choose to not supply an editor)
+    return true;
 }
 
 juce::AudioProcessorEditor* CompViewAudioProcessor::createEditor()
@@ -195,17 +184,3 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new CompViewAudioProcessor();
 }
-
-
-/*
-juce::AudioProcessorValueTreeState::ParameterLayout CompViewAudioProcessor::createParameterLayout()
-{
-    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
-
-    params.push_back(std::make_unique<juce::AudioParameterFloat>("loopLength", "Loop length", 100, 1000, 349));
-    params.push_back(std::make_unique<juce::AudioParameterInt>("batches", "Batches", 1, 8, 4));
-    params.push_back(std::make_unique<juce::AudioParameterInt>("nudge", "Nudge", -10, 10, 0));
-
-    return { params.begin(), params.end() };
-}
-*/

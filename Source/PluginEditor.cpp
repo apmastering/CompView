@@ -7,7 +7,9 @@
 
 
 CompViewAudioProcessorEditor::CompViewAudioProcessorEditor(CompViewAudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p)
+: AudioProcessorEditor(&p),
+audioProcessor(p),
+customTypeface(APFont::getFont())
 {
     refreshRate = 33;
     historySize = 350;
@@ -19,7 +21,7 @@ CompViewAudioProcessorEditor::CompViewAudioProcessorEditor(CompViewAudioProcesso
            peakHistoryRight.add(0.0f);
        }
 
-    setSize(1600, 800);
+    setSize(pluginWindowWidth, 800);
     startTimer(refreshRate);
 }
 
@@ -36,32 +38,67 @@ void CompViewAudioProcessorEditor::paint(juce::Graphics& g)
     int canvasWidth = getWidth();
     int thresholdY = canvasHeight * (1 - audioProcessor.triggerThreshold);
     
-    g.fillAll(juce::Colours::whitesmoke);
-    g.setColour(juce::Colours::black);
+    g.fillAll(juce::Colours::darkgrey);
+    g.setColour(juce::Colours::white);
     g.setFont(20.0f);
-    g.drawFittedText("AP Mastering - CompView", getLocalBounds(), juce::Justification::centredTop, 1);
-    g.drawFittedText(juce::String(audioProcessor.countdown), getLocalBounds(), juce::Justification::topRight, 1);
     
-    g.setColour(juce::Colour::fromRGB(240, 240, 240));
-    g.fillRect(offset, offset, canvasWidth - (offset * 2), canvasHeight - (offset * 2));
-    g.setColour(juce::Colour::fromRGB(0, 0, 0));
-    g.drawRect(offset, offset, canvasWidth - (offset * 2), canvasHeight - (offset * 2), 3);
-    
-    g.drawLine(offset, thresholdY + offsetY, canvasWidth - offset, thresholdY + offsetY, 1.0f);
-    
-    for (int i = 1; i < audioProcessor.peakLevelLeftSec.size(); ++i)
-    {
-        x1 = i + 20;
-        x2 = i + 21;
-        y1l = canvasHeight * (1 - audioProcessor.peakLevelLeftSec[(i - 1)]);
-        y2l = canvasHeight * (1 - audioProcessor.peakLevelLeftSec[i]);
-        y1r = canvasHeight * (1 - audioProcessor.peakLevelRightSec[(i - 1)]);
-        y2r = canvasHeight * (1 - audioProcessor.peakLevelRightSec[i]);
+    float timePerSample = 1 / (audioProcessor.currentSampleRate.load() / audioProcessor.currentWindowSize.load());
+    int timeForPluginWindow = timePerSample * pluginWindowWidth * 1000;
         
-        g.setColour(juce::Colours::red);
-        g.drawLine(x1 + offset, y1l + offsetY, x2 + offset, y2l + offsetY, 2.0f);
-        g.setColour(juce::Colours::blue);
-        g.drawLine(x1 + offset, y1r + offsetY, x2 + offset, y2r + offsetY, 2.0f);
+    customTypeface.setHeight(64.0f);
+    g.setFont(customTypeface);
+
+    g.drawFittedText("AP MASTERING", 0, 0, canvasWidth, 200, juce::Justification::centredTop, 1);
+    
+    customTypeface.setHeight(32.0f);
+    g.setFont(customTypeface);
+    
+    g.drawFittedText("CompView", 0, 60, canvasWidth, 200, juce::Justification::centredTop, 1);
+        
+    customTypeface.setHeight(24.0f);
+    g.setFont(customTypeface);
+
+    g.drawFittedText("WINDOW LENGTH: " + std::to_string(timeForPluginWindow) + "ms", 0, 130, canvasWidth, 200, juce::Justification::topRight, 1);
+    
+    g.drawFittedText(std::to_string(static_cast<int>(timeForPluginWindow * 0.25)) + "ms", 0, canvasHeight-200, canvasWidth * 0.5, 200, juce::Justification::centredBottom, 1);
+    g.drawFittedText(std::to_string(static_cast<int>(timeForPluginWindow * 0.5))  + "ms", 0, canvasHeight-200, canvasWidth, 200, juce::Justification::centredBottom, 1);
+    g.drawFittedText(std::to_string(static_cast<int>(timeForPluginWindow * 0.75)) + "ms", canvasWidth * 0.5, canvasHeight-200, canvasWidth * 0.5, 200, juce::Justification::centredBottom, 1);
+    
+    std::string recordStatus;
+    
+    if (audioProcessor.countdown > 0) {
+        recordStatus = "TRIGGERED";
+    } else {
+        recordStatus = "WAITING";
+    }
+    
+    g.drawFittedText(recordStatus, 0, 160, canvasWidth, 140, juce::Justification::topRight, 1);
+    g.drawFittedText(std::to_string(static_cast<int>(audioProcessor.currentSampleRate.load())), 0, 100, canvasWidth, 40, juce::Justification::topRight, 1);
+    
+    g.drawFittedText("THRESHOLD", 1000, thresholdY, 100, 140, juce::Justification::centredTop, 1);
+    //g.drawFittedText("-12db", 1000, 663, 100, 140, juce::Justification::centredTop, 1);
+
+    g.setColour(juce::Colours::lightgrey);
+
+    g.drawLine(0, thresholdY, canvasWidth, thresholdY, 1.0f);
+    //g.drawLine(0, 663, canvasWidth, 663, 1.0f);
+    g.drawLine(canvasWidth * 0.25, 300, canvasWidth * 0.25, canvasHeight - 30, 1.0f);
+    g.drawLine(canvasWidth * 0.5,  300, canvasWidth * 0.5, canvasHeight - 30, 1.0f);
+    g.drawLine(canvasWidth * 0.75, 300, canvasWidth * 0.75, canvasHeight - 30, 1.0f);
+    
+    for (int i = 1; i < canvasWidth; ++i) {
+        
+        x1 = i + 0;
+        x2 = i + 1;
+        y1l = canvasHeight * (0.9 - 0.7 * audioProcessor.peakLevelLeftSec[(i - 1)]);
+        y2l = canvasHeight * (0.9 - 0.7 * audioProcessor.peakLevelLeftSec[i]);
+        y1r = canvasHeight * (0.9 - 0.7 * audioProcessor.peakLevelRightSec[(i - 1)]);
+        y2r = canvasHeight * (0.9 - 0.7 * audioProcessor.peakLevelRightSec[i]);
+        
+        g.setColour(juce::Colours::cyan);
+        g.drawLine(x1, y1l, x2, y2l, 2.0f);
+        g.setColour(juce::Colours::lime);
+        g.drawLine(x1, y1r, x2, y2r, 2.0f);
     }
 }
 
@@ -73,7 +110,5 @@ void CompViewAudioProcessorEditor::resized()
 
 void CompViewAudioProcessorEditor::timerCallback()
 {
-    if(audioProcessor.peakLevelLeftSec.size() > 0) {
         repaint();
-    }
 }
